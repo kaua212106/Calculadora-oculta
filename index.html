@@ -1104,5 +1104,24 @@ $("#nE").onclick=async()=>{const t=$("#nt").value;if(!t.trim()){toast("Nota vazi
   const sl=nrm(t.split("\n")[0]).replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30);
   await saveFile("nota-"+(sl||"sem-titulo")+".txt",new Blob([t],{type:"text/plain"}))};
 </script>
+<script>
+/* ===== Navegador interno (separado do navegador do celular) ===== */
+$("#gs").insertAdjacentHTML("beforebegin",mk("web","Navegador","",
+ '<div class="cv" style="flex:1"><div class="srch" style="padding:14px 0 10px"><input id="wbu" placeholder="Site ou pesquisa" inputmode="url" autocapitalize="off" autocorrect="off" autocomplete="off"></div>'+
+ '<button id="wbg" style="width:100%;border:0;border-radius:14px;padding:13px;font:inherit;font-size:17px;font-weight:600;background:var(--op,#0a84ff);color:#fff">Abrir</button>'+
+ '<p style="opacity:.55;font-size:13px;line-height:1.45;margin-top:14px">Abre dentro do app. Não usa o histórico, as senhas nem os logins do seu navegador, e nada fica salvo ao fechar.</p></div>'));
+$("#hap").insertAdjacentHTML("beforeend",icn("🌐","Navegador"));
+function webGo(){const v=$("#wbu").value.trim();if(!v)return;
+  const url=/^[a-z][a-z0-9+.-]*:\/\//i.test(v)?v:(/^[^\s]+\.[^\s]{2,}$/.test(v)||/^localhost(:\d+)?(\/|$)/.test(v)?"https://"+v:"https://duckduckgo.com/?q="+encodeURIComponent(v));
+  const C=window.cordova&&cordova.InAppBrowser;
+  if(C){const r=C.open(url,"_blank","location=yes,clearcache=yes,clearsessioncache=yes,zoom=yes,hidenavigationbuttons=no,closebuttoncaption=Fechar");
+    const iv=setInterval(()=>{if(K)bump();else clearInterval(iv)},30000);
+    r.addEventListener("exit",()=>{clearInterval(iv);const e=$("#wbu");if(e)e.value=""})}
+  else window.open(url,"_blank","noopener")}
+$("#wbg").onclick=webGo;
+$("#wbu").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();webGo()}});
+{const o=openApp;openApp=function(n){if(n==="Navegador"){bump();$("#web").classList.add("on");setTimeout(()=>{const e=$("#wbu");e&&e.focus()},350);return}return o(n)}}
+{const l=lockGal;lockGal=function(){const e=$("#wbu");if(e)e.value="";l()}}
+</script>
 </body>
 </html>
