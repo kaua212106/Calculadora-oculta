@@ -1,0 +1,14 @@
+COMO GERAR O APK PELO GITHUB
+
+1. Crie um repositório no GitHub (pode ser privado).
+2. Envie TODOS os arquivos para a raiz dele, inclusive a pasta oculta
+   ".github". Se ela não subir pelo site, crie o arquivo
+   .github/workflows/build-apk.yml e cole o conteúdo dele.
+3. Aba "Actions": o "Gerar APK" roda sozinho (~5 a 8 min). Se não rodar,
+   clique em "Run workflow".
+4. Baixe "Calculadora-APK" em "Artifacts": dentro está o app-debug.apk.
+5. Instale no celular (permita fontes desconhecidas).
+
+Para atualizar o app: troque o index.html e envie de novo.
+O APK é "debug": versões futuras precisam vir da mesma chave, senão o
+Android pede para desinstalar a anterior (e perde os dados). Faça backup.

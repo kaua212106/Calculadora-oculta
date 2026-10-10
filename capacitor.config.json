@@ -1,0 +1,8 @@
+{
+  "appId": "com.calculadora.app",
+  "appName": "Calculadora",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}
