@@ -89,7 +89,8 @@ body{font-family:"MiSans","Mi Sans",Roboto,"Segoe UI",system-ui,-apple-system,"H
 .xdisp{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 28px}
 #xhist{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;text-align:right;margin-bottom:clamp(36px,16vh,140px)}
 .xhi{font-size:18px;line-height:31px;color:var(--xsub);white-space:nowrap;cursor:pointer;flex:none;font-weight:300}
-#xin{font-size:44px;font-weight:300;line-height:55px;color:var(--xfg);text-align:right;overflow:hidden;max-height:165px;overflow-wrap:anywhere;margin-bottom:24px;flex:none}
+#xin{font-size:44px;font-weight:300;line-height:55px;color:var(--xfg);text-align:right;overflow:hidden;max-height:165px;overflow-wrap:anywhere;margin-bottom:0;flex:none}
+#xpre{height:40px;line-height:40px;margin:4px 0 20px;font-size:26px;font-weight:300;color:var(--xsub);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
 #xin i{display:inline-block;width:2px;height:50px;background:var(--op);vertical-align:middle;margin-left:1px;animation:xbl 1s steps(1) infinite;transform:translateY(-3px)}
 @keyframes xbl{50%{opacity:0}}
 .xk{padding:0 28px calc(env(safe-area-inset-bottom,0px) + 26px);flex:none}
@@ -165,7 +166,7 @@ body{font-family:"MiSans","Mi Sans",Roboto,"Segoe UI",system-ui,-apple-system,"H
       <button class="xi" id="xMore" aria-label="Menu"></button>
     </div>
     <div class="xp on" id="xCalc">
-      <div class="xdisp"><div id="xhist"></div><div id="xin"><span id="xtxt">0</span><i></i></div></div>
+      <div class="xdisp"><div id="xhist"></div><div id="xin"><span id="xtxt">0</span><i></i></div><div id="xpre"></div></div>
       <div class="xk" id="xk"><div class="xg xg4" id="xg4"></div><div class="xg xg5" id="xg5"></div></div>
     </div>
     <div class="xp" id="xConv"></div>
@@ -831,6 +832,21 @@ function show(){
   $("#xtxt").textContent=t;
   $("#xin").style.fontSize=(l>26?26:l>20?32:l>14?38:44)+"px";
   $("#xin").scrollTop=1e5;
+  preview();
+}
+/* pré-resultado ao vivo (só aparece quando há uma conta; número puro nunca mostra nada) */
+function preview(){
+  const p=$("#xpre");let out="";
+  try{
+    if(e&&!justEq){
+      const t=e.replace(/[+−×÷^]+$/,"");
+      if(t&&!/^−?[\d.]+$/.test(t)){
+        const r=evalExpr(e,pctMode()),s=isNaN(r)?null:fmtNum(r);
+        if(s!==null&&s!==e)out="= "+fmtD(s);
+      }
+    }
+  }catch(_){out=""}
+  p.textContent=out;
 }
 function mini(){
   const b=$("#xhist");b.innerHTML="";
