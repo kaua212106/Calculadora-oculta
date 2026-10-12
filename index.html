@@ -335,9 +335,12 @@ async function renderGal(){const g=$("#gal");urls.forEach(URL.revokeObjectURL);u
     return}
   g.className="gal";vis=items.filter(i=>!i.kind&&i.type!=="note"&&(!alb||i.album===alb));
   if(!vis.length){g.innerHTML=msg("Nada aqui ainda.<br>Toque em “+ Adicionar” para guardar fotos e vídeos"+(alb?" neste álbum":"")+".");return}
-  vis.forEach((it,i)=>{const t=document.createElement("div");t.className="t"+(sel.has(it.k)?" s":"");t.innerHTML=it.type.startsWith("video")?"<video muted preload=metadata></video>":'<img alt="">';g.append(t);
+  vis.forEach((it,i)=>{const t=document.createElement("div");t.className="t"+(sel.has(it.k)?" s":"");const isV=it.type.startsWith("video");t.innerHTML='<img alt="">'+(isV?'<span class="pp">▶</span><span class="pb"></span>':'');g.append(t);
     t.onclick=()=>{if(selMode){sel.has(it.k)?sel.delete(it.k):sel.add(it.k);t.classList.toggle("s");upSb()}else showV(i)};
-    unseal(it).then(b=>{const u=URL.createObjectURL(new Blob([b],{type:it.type}));urls.push(u);it.u=u;t.firstChild.src=u}).catch(()=>{})})}
+    unseal(it).then(b=>{const u=URL.createObjectURL(new Blob([b],{type:it.type}));urls.push(u);it.u=u;
+      if(!isV){t.firstChild.src=u;return}
+      const c=thCache.get(it.k);if(c){setPoster(t,c);return}
+      thq=thq.then(()=>vposter(u)).then(r=>{if(!r)return;const c2={u:URL.createObjectURL(r.b),d:r.d};thCache.set(it.k,c2);setPoster(t,c2)}).catch(()=>{})}).catch(()=>{})})}
 function showV(i){vi=i;const it=vis[i],c=$("#gvc");if(!it.u)return;c.innerHTML=it.type.startsWith("video")?'<video controls autoplay playsinline></video>':'<img alt="">';c.firstChild.src=it.u;$("#gv").classList.add("on")}
 $("#gvc").addEventListener("touchstart",e=>{tx0=e.touches[0].clientX},{passive:true});
 $("#gvc").addEventListener("touchend",e=>{const im=$("#gvc img");if(im&&im.style.transform)return;const d=e.changedTouches[0].clientX-tx0;if(Math.abs(d)>60){const n=vi+(d<0?1:-1);if(n>=0&&n<vis.length)showV(n)}});
@@ -1122,6 +1125,23 @@ $("#wbg").onclick=webGo;
 $("#wbu").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();webGo()}});
 {const o=openApp;openApp=function(n){if(n==="Navegador"){bump();$("#web").classList.add("on");setTimeout(()=>{const e=$("#wbu");e&&e.focus()},350);return}return o(n)}}
 {const l=lockGal;lockGal=function(){const e=$("#wbu");if(e)e.value="";l()}}
+</script>
+<style>
+.gal .t{aspect-ratio:auto;height:0;padding-bottom:100%;position:relative;background:#222}
+.gal .t img,.gal .t video{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover}
+.gal .t .pp{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;padding-left:2px;box-sizing:border-box;pointer-events:none}
+.gal .t .pb{position:absolute;right:6px;bottom:4px;color:#fff;font-size:12px;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.8);pointer-events:none}
+</style>
+<script>
+/* ===== Pré-capa dos vídeos na galeria ===== */
+let thq=Promise.resolve();const thCache=new Map();
+function vposter(u){return new Promise(res=>{const v=document.createElement("video");v.muted=true;v.playsInline=true;v.preload="auto";v.src=u;let done=false;
+  const fin=x=>{if(done)return;done=true;try{v.removeAttribute("src");v.load()}catch(_){}res(x)};
+  v.onloadeddata=()=>{try{v.currentTime=Math.min(.1,(v.duration||1)/2)}catch(_){fin(null)}};
+  v.onseeked=()=>{try{const w=v.videoWidth,h=v.videoHeight;if(!w){fin(null);return}const k=Math.min(1,400/Math.max(w,h)),c=document.createElement("canvas");c.width=Math.round(w*k);c.height=Math.round(h*k);c.getContext("2d").drawImage(v,0,0,c.width,c.height);const d=v.duration;c.toBlob(b=>fin(b?{b,d}:null),"image/jpeg",.75)}catch(_){fin(null)}};
+  v.onerror=()=>fin(null);setTimeout(()=>fin(null),10000)})}
+function setPoster(t,c){const im=t.querySelector("img");if(im)im.src=c.u;const b=t.querySelector(".pb");if(b&&isFinite(c.d)){const m=Math.floor(c.d/60),x=Math.floor(c.d%60);b.textContent=m+":"+String(x).padStart(2,"0")}}
+{const l=lockGal;lockGal=function(){thCache.forEach(c=>URL.revokeObjectURL(c.u));thCache.clear();l()}}
 </script>
 </body>
 </html>
