@@ -262,7 +262,7 @@ $("#tX").onclick=()=>$("#ts").classList.remove("on");
 document.addEventListener("keydown",ev=>{if(ev.target.tagName==="TEXTAREA")ev.stopImmediatePropagation()},true);
 
 /* banco e chave */
-function gdb(){return new Promise((ok,no)=>{if(db)return ok(db);try{const q=indexedDB.open("calc_vault",2);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains("m"))d.createObjectStore("m",{autoIncrement:true});if(!d.objectStoreNames.contains("k"))d.createObjectStore("k")};q.onsuccess=()=>{db=q.result;ok(db)};q.onerror=()=>no(q.error)}catch(x){no(x)}})}
+function gdb(){return new Promise((ok,no)=>{if(db)return ok(db);try{const q=indexedDB.open("calc_vault",3);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains("m"))d.createObjectStore("m",{autoIncrement:true});if(!d.objectStoreNames.contains("k"))d.createObjectStore("k");if(!d.objectStoreNames.contains("t"))d.createObjectStore("t")};q.onsuccess=()=>{db=q.result;ok(db)};q.onerror=()=>no(q.error)}catch(x){no(x)}})}
 /* exclusão vai para a lixeira (marca "del"); s.destroy apaga de vez */
 function softS(s){return{get:k=>s.get(k),getAll:()=>s.getAll(),getAllKeys:()=>s.getAllKeys(),add:v=>s.add(v),put:(v,k)=>s.put(v,k),destroy:k=>s.delete(k),
   delete(k){const f={},fin=()=>{f.onsuccess&&f.onsuccess()},fail=e=>{f.error=e;f.onerror&&f.onerror()},g=s.get(k);
@@ -270,7 +270,8 @@ function softS(s){return{get:k=>s.get(k),getAll:()=>s.getAll(),getAllKeys:()=>s.
       if(!v||v instanceof Blob||v.kind==="wall"){const q=s.delete(k);q.onsuccess=fin;q.onerror=()=>fail(q.error);return}
       v.del=Date.now();const p=s.put(v,k);p.onsuccess=fin;p.onerror=()=>fail(p.error)};
     g.onerror=()=>fail(g.error);return f}}}
-function tx(st,mode,fn){return gdb().then(d=>new Promise((ok,no)=>{const s=d.transaction(st,mode).objectStore(st);const r=fn(st==="m"&&mode==="readwrite"?softS(s):s);r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)}))}
+let META=null,METAN="";
+function tx(st,mode,fn){const w=st==="m"&&mode==="readwrite";if(w)META=null;return gdb().then(d=>new Promise((ok,no)=>{const s=d.transaction(st,mode).objectStore(st);const r=fn(w?softS(s):s);r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)})).then(x=>{if(w)META=null;return x})}
 async function pk(pin,salt){const k=await crypto.subtle.importKey("raw",enc.encode(pin),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:150000,hash:"SHA-256"},k,{name:"AES-GCM",length:256},false,["encrypt","decrypt"])}
 async function saveKey(pin){let r;if(pin){const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));r={w:1,salt,iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},await pk(pin,salt),RAW)}}else r={w:0,raw:RAW};await tx("k","readwrite",s=>s.put(r,"key"))}
 async function loadKey(pin){const r=await tx("k","readonly",s=>s.get("key"));
@@ -281,7 +282,7 @@ async function loadKey(pin){const r=await tx("k","readonly",s=>s.get("key"));
   K=await crypto.subtle.importKey("raw",RAW,"AES-GCM",false,["encrypt","decrypt"]);return true}
 async function hasPin(){try{const r=await tx("k","readonly",s=>s.get("key"));return r?!!r.w:!!LS.get("calc_pin")}catch(_){return !!LS.get("calc_pin")}}
 async function seal(buf,type,album){const iv=crypto.getRandomValues(new Uint8Array(12));return{iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},K,buf),type,album:album||""}}
-const unseal=it=>crypto.subtle.decrypt({name:"AES-GCM",iv:it.iv},K,it.ct);
+const unseal=async it=>{let ct=it.ct;if(!ct){const r=await tx("m","readonly",s=>s.get(it.k));ct=r.ct}return crypto.subtle.decrypt({name:"AES-GCM",iv:it.iv},K,ct)};
 
 /* modal com campo de texto opcional */
 function modal(title,cb,txt){$("#pm").textContent=title;const i=$("#pi");i.value="";i.type=txt?"text":"password";i.inputMode=txt?"text":"numeric";i.maxLength=txt?30:12;i.style.letterSpacing=txt?"0":"4px";$("#pe").textContent="";pinCb=cb;$("#ps").classList.add("on");setTimeout(()=>i.focus(),60)}
@@ -321,7 +322,7 @@ $("#gtb").onclick=ev=>{const c=ev.target.closest(".chip");if(!c)return;const d=c
 /* grade, seleção, visualizador */
 const upSb=()=>$("#sDl").textContent="Excluir ("+sel.size+")";
 async function renderGal(){const g=$("#gal");urls.forEach(URL.revokeObjectURL);urls=[];g.innerHTML="";if(!K)return;
-  try{const keys=await tx("m","readonly",s=>s.getAllKeys()),vals=await tx("m","readonly",s=>s.getAll());items=[];
+  try{const L=await loadAll(),keys=L.map(e=>e.k),vals=L.map(e=>e.v);items=[];
     trash=[];for(let i=0;i<keys.length;i++){let v=vals[i];if(v instanceof Blob){v=await seal(await v.arrayBuffer(),v.type,"");await tx("m","readwrite",s=>s.put(v,keys[i]))}if(v.del)trash.push({k:keys[i],...v});else items.push({k:keys[i],...v})}
   }catch(x){g.innerHTML=msg("Não foi possível acessar o armazenamento deste navegador.");return}
   tb();$("#sb").classList.toggle("on",selMode&&tab==="f");upSb();{const q=$("#qn");if(q)q.style.display=tab==="n"?"block":"none"}
@@ -337,11 +338,9 @@ async function renderGal(){const g=$("#gal");urls.forEach(URL.revokeObjectURL);u
   if(!vis.length){g.innerHTML=msg("Nada aqui ainda.<br>Toque em “+ Adicionar” para guardar fotos e vídeos"+(alb?" neste álbum":"")+".");return}
   vis.forEach((it,i)=>{const t=document.createElement("div");t.className="t"+(sel.has(it.k)?" s":"");const isV=it.type.startsWith("video");t.innerHTML='<img alt="">'+(isV?'<span class="pp">▶</span><span class="pb"></span>':'');g.append(t);
     t.onclick=()=>{if(selMode){sel.has(it.k)?sel.delete(it.k):sel.add(it.k);t.classList.toggle("s");upSb()}else showV(i)};
-    unseal(it).then(b=>{const u=URL.createObjectURL(new Blob([b],{type:it.type}));urls.push(u);it.u=u;
-      if(!isV){t.firstChild.src=u;return}
-      const c=thCache.get(it.k);if(c){setPoster(t,c);return}
-      thq=thq.then(()=>vposter(u)).then(r=>{if(!r)return;const c2={u:URL.createObjectURL(r.b),d:r.d};thCache.set(it.k,c2);setPoster(t,c2)}).catch(()=>{})}).catch(()=>{})})}
-function showV(i){vi=i;const it=vis[i],c=$("#gvc");if(!it.u)return;c.innerHTML=it.type.startsWith("video")?'<video controls autoplay playsinline></video>':'<img alt="">';c.firstChild.src=it.u;$("#gv").classList.add("on")}
+    const c=thCache.get(it.k);if(c){isV?setPoster(t,c):t.firstChild.src=c.u;return}tq=tq.then(async()=>{if(!t.isConnected||!K)return;const r=await thumbOf(it);if(!r)return;const c2={u:r.url,d:r.d};thCache.set(it.k,c2);isV?setPoster(t,c2):t.firstChild.src=c2.u}).catch(()=>{})})}
+let vu=null;
+async function showV(i){vi=i;const it=vis[i],c=$("#gvc");let b;try{b=await unseal(it)}catch(_){toast("Não foi possível abrir");return}if(vu)URL.revokeObjectURL(vu);vu=URL.createObjectURL(new Blob([b],{type:it.type}));c.innerHTML=it.type.startsWith("video")?'<video controls autoplay playsinline></video>':'<img alt="">';c.firstChild.src=vu;$("#gv").classList.add("on")}
 $("#gvc").addEventListener("touchstart",e=>{tx0=e.touches[0].clientX},{passive:true});
 $("#gvc").addEventListener("touchend",e=>{const im=$("#gvc img");if(im&&im.style.transform)return;const d=e.changedTouches[0].clientX-tx0;if(Math.abs(d)>60){const n=vi+(d<0?1:-1);if(n>=0&&n<vis.length)showV(n)}});
 $("#gvc").addEventListener("click",e=>{const im=$("#gvc img");if(!im||e.target!==im)return;const n=Date.now();if(n-lt2<300){if(im.style.transform)im.style.transform="";else{const r=im.getBoundingClientRect();im.style.transformOrigin=((e.clientX-r.left)/r.width*100)+"% "+((e.clientY-r.top)/r.height*100)+"%";im.style.transform="scale(2.5)"}}lt2=n});
@@ -350,7 +349,7 @@ $("#gvD").onclick=async()=>{const it=vis[vi];if(!it||!await yes("Excluir este it
 $("#sCn").onclick=()=>{selMode=false;sel.clear();renderGal()};
 $("#sDl").onclick=async()=>{if(!sel.size||!await yes("Excluir "+sel.size+" item(ns)?"))return;for(const k of sel)await tx("m","readwrite",s=>s.delete(k));selMode=false;sel.clear();renderGal()};
 $("#sMv").onclick=()=>{if(!sel.size)return;modal("Mover para o álbum (vazio = sem álbum)",async v=>{v=v.trim();if(v){const a=allAlbs();if(!a.includes(v)){a.push(v);LS.set("calc_albs",JSON.stringify(a))}}
-  for(const it of items)if(sel.has(it.k))await tx("m","readwrite",s=>s.put({iv:it.iv,ct:it.ct,type:it.type,album:v},it.k));selMode=false;sel.clear();renderGal();return true},1)};
+  for(const it of items)if(sel.has(it.k)){const r=await tx("m","readonly",s=>s.get(it.k));r.album=v;await tx("m","readwrite",s=>s.put(r,it.k))};selMode=false;sel.clear();renderGal();return true},1)};
 $("#gAdd").onclick=()=>pick($("#gFile"));
 $("#gFile").onchange=async ev=>{const fs=[...ev.target.files];picking=false;ev.target.value="";if(!K)return;
   for(const f of fs){const s=await seal(await f.arrayBuffer(),f.type||"application/octet-stream",alb);await tx("m","readwrite",st=>st.add(s))}tab="f";renderGal()};
@@ -370,10 +369,19 @@ $("#gm").onclick=ev=>{const a=ev.target.dataset.a;if(!a||!K)return;
   if(a==="exp")exportBk();
   if(a==="imp")pick($("#gImp"))};
 async function exportBk(){
-  try{const keys=await tx("m","readonly",s=>s.getAllKeys()),vals=await tx("m","readonly",s=>s.getAll()),r=await tx("k","readonly",s=>s.get("key"));const its=[];
-    for(let i=0;i<vals.length;i++){let v=vals[i];if(v instanceof Blob)v=await seal(await v.arrayBuffer(),v.type,"");its.push({iv:b2s(v.iv),ct:b2s(v.ct),type:v.type,album:v.album,kind:v.kind||"",del:v.del||0,nm:v.nm?{iv:b2s(v.nm.iv),ct:b2s(v.nm.ct)}:null})}
-    const key=r.w?{w:1,salt:b2s(r.salt),iv:b2s(r.iv),ct:b2s(r.ct)}:{w:0,raw:b2s(r.raw)};
-    if(await saveFile("galeria-backup.json",new Blob([JSON.stringify({v:2,key,items:its})],{type:"application/json"}))){LS.set("calc_lastbk",Date.now());toast("Backup gerado")}}catch(x){toast("Não foi possível exportar")}}
+  try{toast("Gerando backup…");
+    const L=await loadAll(),r=await tx("k","readonly",s=>s.get("key")),J=o=>JSON.stringify(o).replace(/[\u007f-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0"));
+    const key=r.w?{w:1,salt:b2s(r.salt),iv:b2s(r.iv),ct:b2s(r.ct)}:{w:0,raw:b2s(r.raw)},sk=await openSink("galeria-backup.json");
+    let buf=J({v:2,key}).slice(0,-1)+',"items":[',first=true;
+    const fl=async f=>{if(buf.length>(f?0:1<<20)){const x=buf;buf="";await sk.w(x)}};
+    for(const e of L){let v=e.v;if(v instanceof Blob)v=await seal(await v.arrayBuffer(),v.type,"");
+      let ct=v.ct;if(!ct)ct=(await tx("m","readonly",s=>s.get(e.k))).ct;
+      const h=J({iv:b2s(v.iv),type:v.type,album:v.album||"",kind:v.kind||"",del:v.del||0,nm:v.nm?{iv:b2s(v.nm.iv),ct:b2s(v.nm.ct)}:null});
+      buf+=(first?"":",")+h.slice(0,-1)+',"ct":"';first=false;
+      const u=new Uint8Array(ct);for(let o=0;o<u.length;o+=1572864){buf+=b2s(u.subarray(o,o+1572864));await fl()}
+      buf+='"}';await fl()}
+    buf+="]}";await fl(true);
+    if(await sk.end()){LS.set("calc_lastbk",Date.now());toast("Backup gerado")}}catch(x){const m=String(x&&x.message||x);if(!/cancel/i.test(m))toast("Não foi possível exportar")}}
 $("#gImp").onchange=ev=>{picking=false;const f=ev.target.files[0];ev.target.value="";if(f)importBk(f)};
 async function importBk(f){try{const j=JSON.parse(await f.text()),r=j.key;
   const go=async raw=>{const bk=await crypto.subtle.importKey("raw",raw,"AES-GCM",false,["decrypt"]);let n=0;
@@ -441,7 +449,7 @@ function loadAj(){return refreshGm().then(()=>$("#asl").innerHTML=$("#gm").inner
 $("#asl").onclick=ev=>{if(ev.target.dataset.a){$("#gm").onclick({target:ev.target});setTimeout(loadAj,900)}};
 
 /* arquivos */
-async function refreshItems(){const keys=await tx("m","readonly",s=>s.getAllKeys()),vals=await tx("m","readonly",s=>s.getAll());items=[];trash=[];keys.forEach((k,i)=>{const v=vals[i];if(v instanceof Blob)return;if(v.del)trash.push({k,...v});else items.push({k,...v})})}
+async function refreshItems(){const L=await loadAll();items=[];trash=[];L.forEach(({k,v})=>{if(v instanceof Blob)return;if(v.del)trash.push({k,...v});else items.push({k,...v})})}
 const fmtS=n=>n<1024?n+" B":n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB",
 ico=n=>{const e=(n.split(".").pop()||"").toLowerCase();return e==="pdf"?"📕":/^(docx?|txt|md)$/.test(e)?"📄":/^(xlsx?|csv)$/.test(e)?"📊":/^(zip|rar|7z)$/.test(e)?"🗜️":/^(mp3|wav|m4a|aac)$/.test(e)?"🎵":/^(mp4|webm|mov)$/.test(e)?"🎞️":/^(png|jpe?g|gif|webp|svg)$/.test(e)?"🖼️":"📎"};
 async function renderFiles(){const g=$("#fl");g.innerHTML="";if(!K)return;
@@ -449,7 +457,7 @@ async function renderFiles(){const g=$("#fl");g.innerHTML="";if(!K)return;
   const fs=items.filter(i=>i.kind==="file");if(!fs.length){g.innerHTML=msg("Nenhum arquivo.<br>Toque em “+ Adicionar” para guardar PDFs, documentos e outros arquivos.");return}
   for(const it of fs){let n="arquivo";try{n=new TextDecoder().decode(await unseal(it.nm))}catch(_){}
     const d=document.createElement("div");d.className="row2";d.innerHTML='<span style="font-size:26px"></span><div><b></b><small></small></div><button data-a="d">⬇</button><button data-a="x">🗑</button>';
-    d.firstChild.textContent=ico(n);d.querySelector("b").textContent=n;d.querySelector("small").textContent=fmtS(it.ct.byteLength-16);
+    d.firstChild.textContent=ico(n);d.querySelector("b").textContent=n;d.querySelector("small").textContent=fmtS((it.sz||it.ct.byteLength)-16);
     d.onclick=async ev=>{const a=ev.target.dataset.a;if(a==="x"){if(await yes("Excluir "+n+"?")){await tx("m","readwrite",s=>s.delete(it.k));renderFiles()}}else if(a==="d")dlFile(it,n)};
     g.append(d)}}
 async function dlFile(it,n){try{await saveFile(n,new Blob([await unseal(it)],{type:it.type}))}catch(_){toast("Não foi possível salvar")}}
@@ -519,7 +527,7 @@ let AX=null;
 const dec=new TextDecoder();
 let DBN="calc_vault",DECOY=false;
 const getDecoy=()=>LS.get("calc_decoy")||null;
-function gdb(){return new Promise((ok,no)=>{if(db)return ok(db);try{const q=indexedDB.open(DBN,2);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains("m"))d.createObjectStore("m",{autoIncrement:true});if(!d.objectStoreNames.contains("k"))d.createObjectStore("k")};q.onsuccess=()=>{db=q.result;ok(db)};q.onerror=()=>no(q.error)}catch(x){no(x)}})}
+function gdb(){return new Promise((ok,no)=>{if(db)return ok(db);try{const q=indexedDB.open(DBN,3);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains("m"))d.createObjectStore("m",{autoIncrement:true});if(!d.objectStoreNames.contains("k"))d.createObjectStore("k");if(!d.objectStoreNames.contains("t"))d.createObjectStore("t")};q.onsuccess=()=>{db=q.result;ok(db)};q.onerror=()=>no(q.error)}catch(x){no(x)}})}
 const mk=(id,t,x,b)=>'<div class="sheet" id="'+id+'"><div class="sh-h"><span>'+t+'</span><span>'+(x||"")+'<button class="hm">Início</button></span></div>'+b+'</div>';
 $("#gs").insertAdjacentHTML("beforebegin",
  mk("cm","Câmera","",'<div class="cv" style="flex:1"><div class="bgrid"><button id="cmP">📷 Foto</button><button id="cmV">🎥 Vídeo</button></div><div class="res" id="cmN" style="font-size:15px;color:var(--sub);text-align:center">Fotos e vídeos vão direto para o álbum “Câmera” da Galeria, já cifrados.</div><input type="file" id="cmFp" accept="image/*" capture="environment" hidden><input type="file" id="cmFv" accept="video/*" capture="environment" hidden></div>')+
@@ -969,15 +977,21 @@ const nrm=s=>String(s==null?"":s).normalize("NFD").replace(/[\u0300-\u036f]/g,""
  TRASH_DAYS=30;
 let qN="",qP="",qD="",qT=null,P2OK=false,p2f=0;
 
+/* plugins nativos do Capacitor (acha mesmo sem import) e gravação em pedaços */
+const NP=()=>{const C=window.Capacitor;if(!(C&&C.isNativePlatform&&C.isNativePlatform()))return null;const g=n=>{try{return(C.Plugins&&C.Plugins[n])||(C.registerPlugin&&C.registerPlugin(n))}catch(_){return null}};return{F:g("Filesystem"),S:g("Share")}};
+async function openSink(name){const np=NP();
+  if(!np||!np.F||!np.S){const parts=[];return{w:x=>{parts.push(x)},end:()=>saveFile(name,new Blob(parts))}}
+  picking=true;setTimeout(()=>picking=false,90000);let first=true;
+  return{w:async(x,b64)=>{const o={path:name,data:x,directory:"CACHE"};if(!b64)o.encoding="utf8";await(first?np.F.writeFile(o):np.F.appendFile(o));first=false},
+    end:async()=>{const f=await np.F.getUri({path:name,directory:"CACHE"});await np.S.share({title:name,url:f.uri,dialogTitle:"Salvar ou enviar"});return true}}}
 /* download: usa o recurso do Claude se existir; senão, download normal do navegador */
 async function saveFile(name,blob){
   const dl=window.claude&&claude.use?await claude.use("downloads").catch(()=>null):null;
   if(dl){try{await dl.save({filename:name,data:blob});return true}catch(x){const c=x&&x.code;if(c!=="declined")toast(c==="rejected_extension"?"Tipo não permitido para salvar aqui":"Não foi possível salvar");return false}}
-  const CP=window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform()?Capacitor.Plugins:null;
-  if(CP&&CP.Filesystem&&CP.Share){try{picking=true;setTimeout(()=>picking=false,90000);
-    const b64=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=()=>no(r.error);r.readAsDataURL(blob)});
-    const f=await CP.Filesystem.writeFile({path:name,data:b64,directory:"CACHE"});
-    await CP.Share.share({title:name,url:f.uri,dialogTitle:"Salvar ou enviar"});return true}
+  const np=NP();
+  if(np&&np.F&&np.S){try{const sk=await openSink(name);
+    for(let o=0;o<blob.size||o===0;o+=1572864){const b64=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]||"");r.onerror=()=>no(r.error);r.readAsDataURL(blob.slice(o,o+1572864))});await sk.w(b64,1)}
+    return await sk.end()}
     catch(x){const m=String(x&&x.message||x);if(!/cancel/i.test(m))toast("Não foi possível salvar");return false}}
   try{picking=true;setTimeout(()=>picking=false,5000);const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);return true}
   catch(_){toast("Download indisponível aqui");return false}}
@@ -1142,6 +1156,25 @@ function vposter(u){return new Promise(res=>{const v=document.createElement("vid
   v.onerror=()=>fin(null);setTimeout(()=>fin(null),10000)})}
 function setPoster(t,c){const im=t.querySelector("img");if(im)im.src=c.u;const b=t.querySelector(".pb");if(b&&isFinite(c.d)){const m=Math.floor(c.d/60),x=Math.floor(c.d%60);b.textContent=m+":"+String(x).padStart(2,"0")}}
 {const l=lockGal;lockGal=function(){thCache.forEach(c=>URL.revokeObjectURL(c.u));thCache.clear();l()}}
+</script>
+<script>
+/* ===== Desempenho: lista em cache (sem blobs grandes) e miniaturas criptografadas ===== */
+async function loadAll(){if(META&&METAN===DBN)return META;const d=await gdb(),out=[];
+  await new Promise((ok,no)=>{const q=d.transaction("m","readonly").objectStore("m").openCursor();
+    q.onsuccess=()=>{const c=q.result;if(!c)return ok();let v=c.value;
+      if(!(v instanceof Blob)&&v.ct){const n=v.ct.byteLength;v=n>262144?{...v,sz:n,ct:null}:{...v,sz:n}}
+      out.push({k:c.key,v});c.continue()};q.onerror=()=>no(q.error)});
+  META=out;METAN=DBN;return out}
+let tq=Promise.resolve();
+async function mkThumb(it,full){
+  if(it.type.startsWith("video")){const u=URL.createObjectURL(new Blob([full],{type:it.type}));try{const r=await vposter(u);return r&&{b:await r.b.arrayBuffer(),d:r.d}}finally{URL.revokeObjectURL(u)}}
+  const bm=await createImageBitmap(new Blob([full],{type:it.type})),k=Math.min(1,320/Math.max(bm.width,bm.height)),c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round(bm.width*k));c.height=Math.max(1,Math.round(bm.height*k));c.getContext("2d").drawImage(bm,0,0,c.width,c.height);if(bm.close)bm.close();
+  const b=await new Promise(r=>c.toBlob(r,"image/jpeg",.7));return b&&{b:await b.arrayBuffer()}}
+async function thumbOf(it){let t=null;try{t=await tx("t","readonly",s=>s.get(it.k))}catch(_){}
+  if(!t){const r=await mkThumb(it,await unseal(it));if(!r)return null;const e=await seal(r.b,"image/jpeg","");t={iv:e.iv,ct:e.ct,d:r.d};try{await tx("t","readwrite",s=>s.put(t,it.k))}catch(_){}}
+  const b=await crypto.subtle.decrypt({name:"AES-GCM",iv:t.iv},K,t.ct);return{url:URL.createObjectURL(new Blob([b],{type:"image/jpeg"})),d:t.d}}
+{const l=lockGal;lockGal=function(){META=null;if(vu){URL.revokeObjectURL(vu);vu=null}l()};$("#gX").onclick=lockGal}
 </script>
 </body>
 </html>
