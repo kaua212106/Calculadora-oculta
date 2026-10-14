@@ -368,7 +368,7 @@ $("#gm").onclick=ev=>{const a=ev.target.dataset.a;if(!a||!K)return;
   if(a==="pin")setSecret("Novo PIN (4 a 8 números)",/^\d{4,8}$/,"Use de 4 a 8 números",v=>saveKey(v),"PIN definido");
   if(a==="nopin")modal("Digite o PIN atual para remover",async v=>{try{const r=await tx("k","readonly",s=>s.get("key"));await crypto.subtle.decrypt({name:"AES-GCM",iv:r.iv},await pk(v,r.salt),r.ct)}catch(_){return "PIN incorreto"}await saveKey(null);toast("PIN removido");return true});
   if(a==="exp")exportBk();
-  if(a==="imp")pick($("#gImp"))};
+  if(a==="imp")openImport()};
 async function exportBk(){
   let sk=null;
   try{
@@ -440,7 +440,7 @@ async function importBkV3(f){
   const startImport=async(raw,pin)=>{
     if(!(raw instanceof Uint8Array)||raw.length!==32)throw new Error("Chave inválida");
     const bk=await crypto.subtle.importKey("raw",raw,"AES-GCM",false,["decrypt"]);
-    let current=null,chunks=[],lastId=null,finished=false,keySaved=false;
+    let current=null,chunks=[],lastId=null,finished=false,keySaved=false;const u=bkUI("Importar backup"),tot=f.size||1,mb=x=>(x/1048576).toFixed(1);let rd0=0;const upd=()=>u.set(rd0/tot,Math.round(rd0/tot*100)+"% · "+mb(rd0)+" de "+mb(tot)+" MB lidos"+(current?"\nItem atual: #"+current.id+" ("+(current.kind||current.type)+")":"")+"\n✔ restaurados "+imported+" · ✖ ignorados "+skipped);
     const saveCurrent=async()=>{
       if(!current)return;
       try{
@@ -454,13 +454,13 @@ async function importBkV3(f){
         if(noteBuf){const e=await seal(noteBuf,"t","");item.nm={iv:e.iv,ct:e.ct}}
         if(current.kind)item.kind=current.kind;if(current.del)item.del=current.del;
         await tx("m","readwrite",st=>st.add(item));imported++;
-      }catch(e){skipped++;try{toast("Item "+(current&&current.id)+" ignorado: "+bkWhy(e))}catch(_){}}
+      }catch(e){skipped++;u.log("Item #"+(current&&current.id)+": "+bkWhy(e))}upd();
       current=null;chunks=[];
     };
     // Stream each line; ciphertext is assembled one item at a time, not for the whole backup.
     const reader=f.stream().getReader();let textBuf="",first=true;
     try{
-      while(true){const {value,done}=await reader.read();if(done)break;textBuf+=dec.decode(value,{stream:true});let ix;
+      while(true){if(u.stop)break;const {value,done}=await reader.read();if(done)break;rd0+=value.length;upd();textBuf+=dec.decode(value,{stream:true});let ix;
         while((ix=textBuf.indexOf("\n"))>=0){const line=textBuf.slice(0,ix);textBuf=textBuf.slice(ix+1);if(first){first=false;continue}if(!line.trim())continue;
           let o;try{o=JSON.parse(line)}catch(_){skipped++;continue}
           if(o.rec==="item"){await saveCurrent();current=o;chunks=[];lastId=o.id}
@@ -473,10 +473,10 @@ async function importBkV3(f){
       await saveCurrent();
     }finally{try{await reader.cancel()}catch(_){}}
     if(imported===0)throw new Error("Nenhum item válido foi recuperado; o cofre não foi alterado");
-    renderGal();toast("Importação concluída: "+imported+" recuperados"+(skipped?", "+skipped+" ignorados":""));
+    renderGal();toast("Importação concluída: "+imported+" recuperados"+(skipped?", "+skipped+" ignorados":""));u.done((u.stop?"Interrompido. ":"✔ Importação concluída. ")+"Restaurados: "+imported+" · Ignorados: "+skipped+(skipped?"\n(veja os motivos na lista)":""));
   };
   const r=header.key;
-  if(r.w===1){modal("PIN do backup",async v=>{try{const salt=s2b(r.salt),iv=s2b(r.iv),ct=s2b(r.ct);const raw=new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv},await pk(v,salt),ct));await startImport(raw,v);return true}catch(e){return String(e&&e.message||e).includes("OperationError")?"PIN incorreto ou backup inválido":String(e&&e.message||e)}})}
+  if(r.w===1){modal("PIN do backup",async v=>{try{const salt=s2b(r.salt),iv=s2b(r.iv),ct=s2b(r.ct);const raw=new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv},await pk(v,salt),ct));await startImport(raw,v);return true}catch(e){if(!/OperationError/.test(String(e&&e.name)+String(e&&e.message))&&window.bkFail)bkFail(bkWhy(e));return String(e&&e.message||e).includes("OperationError")?"PIN incorreto ou backup inválido":String(e&&e.message||e)}})}
   else if(r.w===0&&typeof r.raw==="string")await startImport(s2b(r.raw),null);
   else throw new Error("Chave do backup inválida");
 }
@@ -487,22 +487,22 @@ async function importBkLegacy(f){
     const go=async(raw,pin)=>{
       if(!(raw instanceof Uint8Array)||raw.length!==32)throw new Error("chave");
       const bk=await crypto.subtle.importKey("raw",raw,"AES-GCM",false,["decrypt"]);
-      let n=0,keySaved=false;
-      await eachBkItem(f,async it=>{
+      let n=0,keySaved=false;const u=bkUI("Importar backup (formato antigo)");u.set(null,"Lendo…");
+      await eachBkItem(f,async it=>{if(u.stop)throw new Error("interrompido");
         if(!it||typeof it.iv!=="string"||typeof it.ct!=="string"||typeof it.type!=="string")throw new Error("item");
         const iv=s2b(it.iv),ct=s2b(it.ct);if(iv.length!==12||!ct.length)throw new Error("dados");
         const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},bk,ct);
         let noteBuf=null;if(it.nm&&it.nm.iv&&it.nm.ct){const niv=s2b(it.nm.iv),nct=s2b(it.nm.ct);if(niv.length!==12||!nct.length)throw new Error("nota");noteBuf=await crypto.subtle.decrypt({name:"AES-GCM",iv:niv},bk,nct)}
         
         const s=await seal(plain,it.type,it.album||"");if(noteBuf){const e=await seal(noteBuf,"t");s.nm={iv:e.iv,ct:e.ct}}if(it.kind)s.kind=it.kind;if(it.del)s.del=it.del;
-        await tx("m","readwrite",st=>st.add(s));n++;
+        await tx("m","readwrite",st=>st.add(s));n++;u.set(null,"✔ restaurados "+n+" itens\nItem atual: #"+n+" ("+(it.kind||it.type)+")");
       });
       
-      toast(n+" itens importados");renderGal();
+      toast(n+" itens importados");renderGal();u.done("✔ Importação concluída. Restaurados: "+n);
     };
     if(r.w===1){
       if(typeof r.salt!=="string"||typeof r.iv!=="string"||typeof r.ct!=="string")throw new Error("chave");
-      modal("PIN do backup",async v=>{try{const salt=s2b(r.salt),iv=s2b(r.iv),ct=s2b(r.ct);if(salt.length!==16||iv.length!==12)throw new Error("chave");const raw=new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv},await pk(v,salt),ct));await go(raw,v);return true}catch(e){return String(e&&e.message||e).includes("OperationError")?"PIN incorreto ou backup inválido":"Falha ao importar: arquivo muito grande, armazenamento cheio ou dados inválidos"}});
+      modal("PIN do backup",async v=>{try{const salt=s2b(r.salt),iv=s2b(r.iv),ct=s2b(r.ct);if(salt.length!==16||iv.length!==12)throw new Error("chave");const raw=new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv},await pk(v,salt),ct));await go(raw,v);return true}catch(e){return String(e&&e.message||e).includes("OperationError")?"PIN incorreto ou backup inválido":(window.bkFail&&bkFail(bkWhy(e)),"Falha ao importar: arquivo muito grande, armazenamento cheio ou dados inválidos")}});
     }else{if(typeof r.raw!=="string")throw new Error("chave");await go(s2b(r.raw),null)}
   }catch(e){toast(String(e&&e.message||e).includes("QuotaExceededError")?"Armazenamento insuficiente para importar o backup":"Arquivo inválido, incompatível ou memória insuficiente")}
 }
@@ -1329,10 +1329,12 @@ const ui=t=>{let d=document.getElementById("bku");if(d)d.remove();d=document.cre
  d.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:16px";
  d.innerHTML='<div style="background:#1c1c1e;color:#fff;border-radius:14px;padding:16px;width:100%;max-width:440px;max-height:88vh;display:flex;flex-direction:column;font:14px/1.4 system-ui,sans-serif"><b style="font-size:16px">'+t+'</b><div style="height:8px;background:#3a3a3c;border-radius:4px;margin:12px 0"><div class="b" style="height:8px;width:0;background:#4c8dff;border-radius:4px"></div></div><div class="s" style="white-space:pre-wrap"></div><div class="l" style="overflow:auto;margin:8px 0;font-size:12px;color:#ffb4b4;white-space:pre-wrap;flex:1"></div><button class="c" style="padding:12px;border:0;border-radius:10px;background:#3a3a3c;color:#fff;font-size:15px">Cancelar</button></div>';
  document.body.appendChild(d);const q=s=>d.querySelector(s),o={stop:false,
-  set(p,x){q(".b").style.width=Math.round(p*100)+"%";q(".s").textContent=x},
+  set(p,x){if(p!=null)q(".b").style.width=Math.round(Math.min(1,p)*100)+"%";q(".s").textContent=x},
   log(x){const l=q(".l");l.textContent+=x+"\n";l.scrollTop=l.scrollHeight},
+  close(){d.remove();window.bkCur=null},
   done(x){q(".b").style.width="100%";q(".s").textContent=x;const c=q(".c");c.textContent="Fechar";c.onclick=()=>d.remove();busy=false}};
- q(".c").onclick=()=>{o.stop=true;q(".c").textContent="Cancelando…"};return o};
+ q(".c").onclick=()=>{o.stop=true;q(".c").textContent="Cancelando…"};window.bkCur=o;return o};
+window.bkUI=ui;window.bkFail=m=>{if(window.bkCur)window.bkCur.done("Importação não concluída: "+m+"\nO que já foi restaurado foi mantido; nada foi apagado.")};
 const kdf=async(pw,salt,iter)=>crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:iter,hash:"SHA-256"},await crypto.subtle.importKey("raw",enc.encode(pw),"PBKDF2",false,["deriveKey"]),{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
 const unwrap=async(h,pw)=>{const r=new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv:s2b(h.iv)},await kdf(pw,s2b(h.salt),h.iter),s2b(h.wk)));if(r.length!==32)throw E("Incompat","chave com tamanho inesperado");return r};
 async function sink(name){const np=NP();
@@ -1344,7 +1346,8 @@ async function sink(name){const np=NP();
  const parts=[];return{w:async u=>{parts.push(u)},size:async()=>null,end:()=>saveFile(name,new Blob(parts))}}
 /* ---------- exportação ---------- */
 async function exp(){
- if(busy)return;if(!K){toast("Abra o cofre primeiro");return}
+ const fw=window.bkFromWipe;window.bkFromWipe=false;if(!fw)window.bkDoneCb=null;
+ if(busy){window.bkDoneCb=null;return}if(!K){toast("Abra o cofre primeiro");return}
  let kr;try{kr=await tx("k","readonly",s=>s.get("key"))}catch(e){toast("Não foi possível ler a chave do cofre");return}
  if(!kr){toast("Cofre sem chave");return}
  const h={format:"VAULT2",v:2,app:"calculadora-oculta",created:new Date().toISOString(),alg:"AES-256-GCM",kdf:"PBKDF2-SHA256"};
@@ -1354,7 +1357,7 @@ async function exp(){
   h.src="senha";h.iter=310000;h.salt=b2s(salt);h.iv=b2s(iv);h.wk=b2s(await crypto.subtle.encrypt({name:"AES-GCM",iv},await kdf(v,salt,h.iter),RAW));
   setTimeout(()=>run(h),0);return true},1)}
 async function run(h){
- busy=true;const u=ui("Exportar backup"),KK=K;let sk=null,okN=0,bytes=0,q=[],qn=0;const bad=[];
+ busy=true;const u=ui("Exportar backup"),KK=K;let sk=null,okN=0,bytes=0,q=[],qn=0,res=false;const bad=[];
  const seal2=async(buf,type)=>{const iv=crypto.getRandomValues(new Uint8Array(12));return{iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},KK,buf),type,album:""}};
  const flush=async()=>{if(!qn)return;const x=new Uint8Array(qn);let o=0;for(const a of q){x.set(a,o);o+=a.length}q=[];qn=0;await sk.w(x);bytes+=x.length};
  const put=async(t,p)=>{const hd=new Uint8Array(5);hd[0]=t;new DataView(hd.buffer).setUint32(1,p.length);q.push(hd,p);qn+=5+p.length;if(qn>=CH)await flush()};
@@ -1384,23 +1387,27 @@ async function run(h){
   const sz=await sk.size();if(sz!=null&&sz!==bytes)throw E("Corrupt","tamanho gravado ("+sz+") difere do esperado ("+bytes+") — falta de espaço?");
   if(bad.length&&!await yes(bad.length+" item(ns) NÃO entraram no backup (veja a lista). Compartilhar mesmo assim?")){u.done("Backup NÃO compartilhado. Itens com falha: "+bad.length);return}
   const shared=await sk.end();
-  if(!bad.length&&shared)LS.set("calc_lastbk",Date.now());
+  if(!bad.length&&shared){LS.set("calc_lastbk",Date.now());res=true}
   u.done((bad.length?"⚠ Backup INCOMPLETO. ":"✔ Backup concluído. ")+"Itens gravados: "+okN+" · Falhas: "+bad.length+" · "+Math.round(bytes/1048576)+" MB")
  }catch(x){const w=why(x);u.log(w);u.done("Exportação não concluída: "+w+"\nO backup gerado não é confiável; os dados originais não foram alterados.")}
- finally{busy=false}}
+ finally{busy=false;const cb=window.bkDoneCb;window.bkDoneCb=null;if(cb)cb(res)}}
 /* ---------- importação ---------- */
-async function scan(f){
+async function scan(f,onp){
  if(f.size<14)throw E("Incompat","arquivo vazio ou pequeno demais");
- let o=8,hdr=null,foot=null,cur=null;const items=[],prefs=[];
+ let o=8,hdr=null,foot=null,cur=null,k=0;const items=[],prefs=[],rd=async(a,b)=>new Uint8Array(await f.slice(a,Math.min(b,f.size)).arrayBuffer()),dv=h=>new DataView(h.buffer,h.byteOffset,h.byteLength);
+ const js=async(h,p,n)=>JSON.parse(D2.decode(5+n<=h.length?h.subarray(5,5+n):await rd(p,p+n)));
  while(o<f.size){
+  if(onp&&k++%4===0)onp(o);
   if(o+5>f.size)throw E("Truncated","arquivo cortado no byte "+o);
-  const h=new Uint8Array(await f.slice(o,o+5).arrayBuffer()),t=h[0],n=new DataView(h.buffer).getUint32(1),p=o+5;
+  const h=await rd(o,o+4096),t=h[0],n=dv(h).getUint32(1),p=o+5;
   if(p+n>f.size)throw E("Truncated","o arquivo termina antes do esperado (cópia ou download interrompido?)");
   if(t===3){if(!cur)throw E("Corrupt","dados sem item");cur.ch.push([p,n]);cur.got+=n}
   else{if(n>4194304)throw E("Corrupt","registro com tamanho absurdo");
-   const j=JSON.parse(D2.decode(await f.slice(p,p+n).arrayBuffer()));
+   const j=await js(h,p,n);
    if(t===1)hdr=j;
-   else if(t===2){if(cur)cur.m.__cut=1;cur={m:j,ch:[],got:0,end:null};items.push(cur)}
+   else if(t===2){cur={m:j,ch:[],got:0,end:null};items.push(cur);
+    if(Number.isInteger(j.len)&&j.len>=0){let q=p+n;const ch=[];for(let r=j.len;r>0;){const z=Math.min(CH,r);ch.push([q+5,z]);q+=5+z;r-=z}
+     if(q+5<=f.size){const eh=await rd(q,q+512);if(eh[0]===4){const en=dv(eh).getUint32(1);if(q+5+en<=f.size&&en<=4194304){const ej=await js(eh,q+5,en);if(ej.id===j.id){cur.ch=ch;cur.got=j.len;cur.end=ej;cur=null;o=q+5+en;continue}}}}}}
    else if(t===4){if(!cur||cur.m.id!==j.id)throw E("Corrupt","fim de item inesperado");cur.end=j;cur=null}
    else if(t===5)foot=j;else if(t===6)prefs.push(j);else throw E("Incompat","tipo de registro desconhecido ("+t+")")}
   o=p+n}
@@ -1410,10 +1417,11 @@ async function scan(f){
  if(items.filter(i=>i.end).length!==foot.items)throw E("Truncated","o rodapé indica "+foot.items+" itens, mas só "+items.filter(i=>i.end).length+" estão completos");
  return{hdr,items,prefs,foot}}
 async function imp(f){
- if(busy)return;
+ if(busy){toast("Já há uma operação de backup em andamento");return}
  let m;try{m=D2.decode(await f.slice(0,8).arrayBuffer())}catch(e){toast("Não foi possível ler o arquivo: "+why(e));return}
  if(m!==MAGIC)return OLD(f);
- let S;try{S=await scan(f)}catch(e){const u=ui("Importar backup");busy=true;u.done("Backup inválido: "+why(e)+"\nNada foi alterado no cofre.");return}
+ busy=true;const u0=ui("Importar backup");u0.set(0,"Verificando a estrutura do arquivo…");let S;
+ try{S=await scan(f,o=>u0.set(o/f.size,"Verificando estrutura… "+Math.round(o/f.size*100)+"% ("+(o/1048576).toFixed(0)+" de "+(f.size/1048576).toFixed(0)+" MB)"));u0.close();busy=false}catch(e){u0.done("Backup inválido: "+why(e)+"\nNada foi alterado no cofre.");return}
  const h=S.hdr;
  modal(h.src==="pin"?"PIN do backup":"Senha do backup",async v=>{let raw;
   try{raw=await unwrap(h,v)}catch(_){return"Senha/PIN incorreto ou backup alterado"}
@@ -1424,17 +1432,17 @@ async function load(f,S,raw){
   if(!KK)throw E("Incompat","cofre bloqueado");
   const bk=await crypto.subtle.importKey("raw",raw,"AES-GCM",false,["decrypt"]);
   const seal2=async(buf,type,album)=>{const iv=crypto.getRandomValues(new Uint8Array(12));return{iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},KK,buf),type,album:album||""}};
-  const have=new Set((await loadAll()).map(e=>e.v&&e.v.bk).filter(Boolean)),N=S.items.length;
+  const have=new Set((await loadAll()).map(e=>e.v&&e.v.bk).filter(Boolean)),N=S.items.length,TB=S.items.reduce((a,i)=>a+(i.m.len||0),0)||1;let DB=0;const mb=x=>(x/1048576).toFixed(1);
   for(let i=0;i<N;i++){
    if(u.stop)break;const it=S.items[i],m=it.m;let lab="#"+m.id+" ("+(m.kind||m.type)+")";
-   u.set(i/N,"Restaurando "+(i+1)+" de "+N+" · ok "+ok+" · duplicados "+dup+" · falhas "+bad.length);
+   const upd=()=>u.set(DB/TB,"Item "+(i+1)+" de "+N+" · "+Math.round(DB/TB*100)+"%\nArquivo atual: "+lab+"\n"+mb(DB)+" de "+mb(TB)+" MB\n✔ restaurados "+ok+" · ⏭ já existiam "+dup+" · ✖ falhas "+bad.length);upd();
    try{
     if(typeof bump==="function")bump();
-    if(have.has(m.uid)){dup++;continue}
+    if(have.has(m.uid)){dup++;DB+=m.len||0;continue}
     let nb=null;if(m.nm){nb=await crypto.subtle.decrypt({name:"AES-GCM",iv:s2b(m.nm.iv)},bk,s2b(m.nm.ct));lab+=" "+D2.decode(nb)}
     if(!it.end)throw E("Truncated","item incompleto no arquivo");
     if(it.got!==m.len)throw E("Corrupt","tamanho divergente ("+it.got+" de "+m.len+" bytes)");
-    const ct=new Uint8Array(m.len);let o=0;for(const[p,n]of it.ch){ct.set(new Uint8Array(await f.slice(p,p+n).arrayBuffer()),o);o+=n}
+    const ct=new Uint8Array(m.len);let o=0;for(const[p,n]of it.ch){const bb=new Uint8Array(await f.slice(p-5,p+n).arrayBuffer());if(bb.length!==n+5||bb[0]!==3||new DataView(bb.buffer).getUint32(1)!==n)throw E("Corrupt","bloco de dados fora do lugar ou cortado");ct.set(bb.subarray(5),o);o+=n}
     if(hx(await crypto.subtle.digest("SHA-256",ct))!==it.end.sha)throw E("Corrupt","SHA-256 não confere (bytes alterados ou danificados)");
     const iv=s2b(m.iv);if(iv.length!==12)throw E("Corrupt","IV inválido");
     const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},bk,ct);
@@ -1443,7 +1451,7 @@ async function load(f,S,raw){
     if(m.kind)s.kind=m.kind;if(m.del)s.del=m.del;s.bk=m.uid;
     const k=await tx("m","readwrite",st=>st.add(s)),b=await tx("m","readonly",st=>st.get(k));
     if(!b||!b.ct||b.ct.byteLength!==s.ct.byteLength)throw E("Corrupt","a gravação não pôde ser confirmada");
-    have.add(m.uid);ok++
+    have.add(m.uid);ok++;DB+=m.len||0;upd()
    }catch(x){const w=why(x);bad.push(lab+": "+w);u.log(lab+": "+w);if(/espaço/.test(w)){u.log("Importação interrompida por falta de espaço. O que já foi restaurado foi mantido.");break}}
   }
   if(!DECOY)for(const p of S.prefs){try{const j=JSON.parse(D2.decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:s2b(p.iv)},bk,s2b(p.ct)))),a=JSON.parse(LS.get("calc_albs")||"[]");
@@ -1453,6 +1461,59 @@ async function load(f,S,raw){
  }catch(x){u.done("Importação não concluída: "+why(x)+"\nO que já foi restaurado foi mantido; nada foi apagado.")}
  finally{busy=false}}
 window.exportBk=exp;window.importBk=imp;
+})();
+</script>
+<script>
+/* ===== Correção: botão "Importar backup" (seletor de arquivos) e leitura sem File.stream() ===== */
+(()=>{
+const P=Blob.prototype;
+if(!P.arrayBuffer)P.arrayBuffer=function(){const b=this;return new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>no(r.error);r.readAsArrayBuffer(b)})};
+if(!P.stream)P.stream=function(){const b=this;let o=0;return{getReader(){return{async read(){if(o>=b.size)return{done:true,value:undefined};const n=await b.slice(o,o+1048576).arrayBuffer();o+=n.byteLength;return{done:false,value:new Uint8Array(n)}},async cancel(){o=b.size}}}}};
+const gi=document.getElementById("gImp");
+if(gi){
+ gi.removeAttribute("accept");gi.removeAttribute("hidden");
+ gi.style.cssText="position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+ gi.onchange=ev=>{picking=false;const f=ev.target.files&&ev.target.files[0];
+  if(!f){toast("Nenhum arquivo selecionado");return}
+  toast("Lendo "+f.name+" ("+Math.round(f.size/1048576)+" MB)…");
+  Promise.resolve().then(()=>importBk(f)).catch(e=>toast("Erro ao importar: "+(window.bkWhy?bkWhy(e):e&&e.message||e)));
+  setTimeout(()=>{try{ev.target.value=""}catch(_){}},0)};
+ gi.addEventListener("cancel",()=>{picking=false})}
+window.openImport=function(){
+ const el=document.getElementById("gImp");
+ if(!el){toast("Seletor de arquivos indisponível neste aparelho");return}
+ try{el.value=""}catch(_){}
+ picking=true;setTimeout(()=>picking=false,90000);
+ try{el.click()}catch(e){picking=false;toast("Não foi possível abrir o seletor de arquivos: "+(e&&e.message||e))}};
+})();
+</script>
+<script>
+/* ===== Botão "Apagar tudo do cofre" (exige backup concluído + confirmação digitada) ===== */
+(()=>{
+async function wipeNow(){
+ try{
+  if(db){try{db.close()}catch(_){}db=null}
+  await new Promise(r=>{const q=indexedDB.deleteDatabase("calc_vault");q.onsuccess=q.onerror=q.onblocked=()=>r()});
+  META=null;const left=(await loadAll()).length;
+  if(left>0){toast("Falha: ainda restam "+left+" itens. Tente de novo.");return}
+  ["calc_albs","calc_wp","calc_lastbk"].forEach(k=>LS.del(k));
+  META=null;try{lockGal()}catch(_){}
+  toast("Cofre apagado")
+ }catch(e){toast("Não foi possível apagar: "+(window.bkWhy?bkWhy(e):e&&e.message||e))}}
+async function wipeFlow(){
+ if(!K||DECOY)return;
+ if(!await yes("Apagar TUDO do cofre? Fotos, vídeos, notas, diário, senhas, contatos e arquivos serão removidos deste aparelho. Antes, o app vai gerar um backup. Continuar?"))return;
+ const p=new Promise(r=>{window.bkDoneCb=r});
+ window.bkFromWipe=true;exportBk();
+ const ok=await p;
+ if(!ok){toast("Nada foi apagado: o backup não foi concluído com sucesso");return}
+ if(window.bkCur)bkCur.close();
+ modal("Guardou o backup em lugar seguro? Para APAGAR TUDO, digite APAGAR",async v=>{
+  if(v.trim().toUpperCase()!=="APAGAR")return"Digite APAGAR para confirmar";
+  setTimeout(wipeNow,0);return true},1)}
+{const r=refreshGm;refreshGm=async function(){await r();const g=$("#gm");
+ if(!DECOY&&g&&!g.querySelector('[data-a="wipevault"]'))g.insertAdjacentHTML("beforeend",'<div data-a="wipevault" style="color:#ff5252">Apagar tudo do cofre</div>')}}
+{const g=$("#gm").onclick;$("#gm").onclick=ev=>{if(ev.target.dataset.a==="wipevault"){if(K)wipeFlow();return}g(ev)}}
 })();
 </script>
 </body>
