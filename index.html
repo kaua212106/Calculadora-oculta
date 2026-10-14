@@ -449,12 +449,12 @@ async function importBkV3(f){
         if(iv.length!==12||!ct.length)throw new Error("dados incompletos");
         const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},bk,ct);
         let noteBuf=null;if(current.nm&&current.nm.iv&&current.nm.ct)noteBuf=await crypto.subtle.decrypt({name:"AES-GCM",iv:s2b(current.nm.iv)},bk,s2b(current.nm.ct));
-        if(!keySaved){RAW=raw;K=await crypto.subtle.importKey("raw",RAW,"AES-GCM",false,["encrypt","decrypt"]);await saveKey(pin||null);keySaved=true}
+        
         const item=await seal(plain,current.type||"application/octet-stream",current.album||"");
         if(noteBuf){const e=await seal(noteBuf,"t","");item.nm={iv:e.iv,ct:e.ct}}
         if(current.kind)item.kind=current.kind;if(current.del)item.del=current.del;
         await tx("m","readwrite",st=>st.add(item));imported++;
-      }catch(_){skipped++}
+      }catch(e){skipped++;try{toast("Item "+(current&&current.id)+" ignorado: "+bkWhy(e))}catch(_){}}
       current=null;chunks=[];
     };
     // Stream each line; ciphertext is assembled one item at a time, not for the whole backup.
@@ -472,7 +472,7 @@ async function importBkV3(f){
       textBuf+=dec.decode();if(textBuf.trim()){try{const o=JSON.parse(textBuf);if(o.rec==="end"&&current&&o.id===current.id)await saveCurrent();else if(o.rec==="finish")finished=true}catch(_){skipped++}}
       await saveCurrent();
     }finally{try{await reader.cancel()}catch(_){}}
-    if(!keySaved){if(imported===0)throw new Error("Nenhum item válido foi recuperado; o cofre não foi alterado");RAW=raw;K=await crypto.subtle.importKey("raw",RAW,"AES-GCM",false,["encrypt","decrypt"]);await saveKey(pin||null)}
+    if(imported===0)throw new Error("Nenhum item válido foi recuperado; o cofre não foi alterado");
     renderGal();toast("Importação concluída: "+imported+" recuperados"+(skipped?", "+skipped+" ignorados":""));
   };
   const r=header.key;
@@ -493,11 +493,11 @@ async function importBkLegacy(f){
         const iv=s2b(it.iv),ct=s2b(it.ct);if(iv.length!==12||!ct.length)throw new Error("dados");
         const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},bk,ct);
         let noteBuf=null;if(it.nm&&it.nm.iv&&it.nm.ct){const niv=s2b(it.nm.iv),nct=s2b(it.nm.ct);if(niv.length!==12||!nct.length)throw new Error("nota");noteBuf=await crypto.subtle.decrypt({name:"AES-GCM",iv:niv},bk,nct)}
-        if(!keySaved){RAW=raw;K=await crypto.subtle.importKey("raw",RAW,"AES-GCM",false,["encrypt","decrypt"]);await saveKey(pin||null);keySaved=true}
+        
         const s=await seal(plain,it.type,it.album||"");if(noteBuf){const e=await seal(noteBuf,"t");s.nm={iv:e.iv,ct:e.ct}}if(it.kind)s.kind=it.kind;if(it.del)s.del=it.del;
         await tx("m","readwrite",st=>st.add(s));n++;
       });
-      if(!keySaved){RAW=raw;K=await crypto.subtle.importKey("raw",RAW,"AES-GCM",false,["encrypt","decrypt"]);await saveKey(pin||null)}
+      
       toast(n+" itens importados");renderGal();
     };
     if(r.w===1){
@@ -1308,6 +1308,152 @@ async function thumbOf(it){let t=null;try{t=await tx("t","readonly",s=>s.get(it.
   if(!t){const r=await mkThumb(it,await unseal(it));if(!r)return null;const e=await seal(r.b,"image/jpeg","");t={iv:e.iv,ct:e.ct,d:r.d};try{await tx("t","readwrite",s=>s.put(t,it.k))}catch(_){}}
   const b=await crypto.subtle.decrypt({name:"AES-GCM",iv:t.iv},K,t.ct);return{url:URL.createObjectURL(new Blob([b],{type:"image/jpeg"})),d:t.d}}
 {const l=lockGal;lockGal=function(){META=null;if(vu){URL.revokeObjectURL(vu);vu=null}l()};$("#gX").onclick=lockGal}
+</script>
+<script>
+/* ===== Backup VAULT2: binário, em fluxo, com SHA-256 por item e chave nunca sobrescrita ===== */
+(()=>{
+const D2=new TextDecoder(),MAGIC="CVAULT2\n",CH=1048576,OLD=importBk;let busy=false;
+const hx=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join(""),
+E=(n,m)=>{const e=new Error(m);e.name=n;return e},
+why=e=>{const n=e&&e.name||"",m=String(e&&e.message||e);
+ if(n==="QuotaExceededError"||/quota|ENOSPC|no space/i.test(m))return"sem espaço de armazenamento";
+ if(n==="NotAllowedError"||n==="SecurityError"||/permission|denied/i.test(m))return"erro de permissão";
+ if(n==="NotReadableError"||n==="NotFoundError")return"erro de leitura do arquivo";
+ if(n==="OperationError")return"falha de descriptografia (chave incorreta ou dados alterados)";
+ if(n==="Corrupt")return"arquivo corrompido — "+m;if(n==="Truncated")return"backup incompleto — "+m;if(n==="Incompat")return"formato incompatível — "+m;
+ if(n==="SyntaxError")return"arquivo corrompido — estrutura ilegível";
+ if(e instanceof RangeError||/memory|allocation/i.test(m))return"memória insuficiente para este item";
+ return(n?n+": ":"")+m};
+window.bkWhy=why;
+const ui=t=>{let d=document.getElementById("bku");if(d)d.remove();d=document.createElement("div");d.id="bku";
+ d.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:16px";
+ d.innerHTML='<div style="background:#1c1c1e;color:#fff;border-radius:14px;padding:16px;width:100%;max-width:440px;max-height:88vh;display:flex;flex-direction:column;font:14px/1.4 system-ui,sans-serif"><b style="font-size:16px">'+t+'</b><div style="height:8px;background:#3a3a3c;border-radius:4px;margin:12px 0"><div class="b" style="height:8px;width:0;background:#4c8dff;border-radius:4px"></div></div><div class="s" style="white-space:pre-wrap"></div><div class="l" style="overflow:auto;margin:8px 0;font-size:12px;color:#ffb4b4;white-space:pre-wrap;flex:1"></div><button class="c" style="padding:12px;border:0;border-radius:10px;background:#3a3a3c;color:#fff;font-size:15px">Cancelar</button></div>';
+ document.body.appendChild(d);const q=s=>d.querySelector(s),o={stop:false,
+  set(p,x){q(".b").style.width=Math.round(p*100)+"%";q(".s").textContent=x},
+  log(x){const l=q(".l");l.textContent+=x+"\n";l.scrollTop=l.scrollHeight},
+  done(x){q(".b").style.width="100%";q(".s").textContent=x;const c=q(".c");c.textContent="Fechar";c.onclick=()=>d.remove();busy=false}};
+ q(".c").onclick=()=>{o.stop=true;q(".c").textContent="Cancelando…"};return o};
+const kdf=async(pw,salt,iter)=>crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:iter,hash:"SHA-256"},await crypto.subtle.importKey("raw",enc.encode(pw),"PBKDF2",false,["deriveKey"]),{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+const unwrap=async(h,pw)=>{const r=new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM",iv:s2b(h.iv)},await kdf(pw,s2b(h.salt),h.iter),s2b(h.wk)));if(r.length!==32)throw E("Incompat","chave com tamanho inesperado");return r};
+async function sink(name){const np=NP();
+ if(np&&np.F&&np.S){picking=true;setTimeout(()=>picking=false,90000);let first=true;
+  return{w:async u=>{const o={path:name,data:b2s(u),directory:"CACHE"};await(first?np.F.writeFile(o):np.F.appendFile(o));first=false},
+   size:async()=>Number((await np.F.stat({path:name,directory:"CACHE"})).size),
+   end:async()=>{const f=await np.F.getUri({path:name,directory:"CACHE"});await np.S.share({title:name,url:f.uri,dialogTitle:"Salvar ou enviar"});return true}}}
+ if(window.showSaveFilePicker){const fh=await showSaveFilePicker({suggestedName:name}),w=await fh.createWritable();return{w:u=>w.write(u),size:async()=>null,end:async()=>{await w.close();return true}}}
+ const parts=[];return{w:async u=>{parts.push(u)},size:async()=>null,end:()=>saveFile(name,new Blob(parts))}}
+/* ---------- exportação ---------- */
+async function exp(){
+ if(busy)return;if(!K){toast("Abra o cofre primeiro");return}
+ let kr;try{kr=await tx("k","readonly",s=>s.get("key"))}catch(e){toast("Não foi possível ler a chave do cofre");return}
+ if(!kr){toast("Cofre sem chave");return}
+ const h={format:"VAULT2",v:2,app:"calculadora-oculta",created:new Date().toISOString(),alg:"AES-256-GCM",kdf:"PBKDF2-SHA256"};
+ if(kr.w){h.src="pin";h.iter=150000;h.salt=b2s(kr.salt);h.iv=b2s(kr.iv);h.wk=b2s(kr.ct);run(h)}
+ else modal("Defina uma senha para o backup (4 a 30 caracteres)",async v=>{if(v.length<4)return"Mínimo de 4 caracteres";
+  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+  h.src="senha";h.iter=310000;h.salt=b2s(salt);h.iv=b2s(iv);h.wk=b2s(await crypto.subtle.encrypt({name:"AES-GCM",iv},await kdf(v,salt,h.iter),RAW));
+  setTimeout(()=>run(h),0);return true},1)}
+async function run(h){
+ busy=true;const u=ui("Exportar backup"),KK=K;let sk=null,okN=0,bytes=0,q=[],qn=0;const bad=[];
+ const seal2=async(buf,type)=>{const iv=crypto.getRandomValues(new Uint8Array(12));return{iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},KK,buf),type,album:""}};
+ const flush=async()=>{if(!qn)return;const x=new Uint8Array(qn);let o=0;for(const a of q){x.set(a,o);o+=a.length}q=[];qn=0;await sk.w(x);bytes+=x.length};
+ const put=async(t,p)=>{const hd=new Uint8Array(5);hd[0]=t;new DataView(hd.buffer).setUint32(1,p.length);q.push(hd,p);qn+=5+p.length;if(qn>=CH)await flush()};
+ const js=o=>enc.encode(JSON.stringify(o));
+ try{
+  const L=await loadAll(),name="galeria-backup-"+new Date().toISOString().slice(0,10)+".vault";
+  sk=await sink(name);q.push(enc.encode(MAGIC));qn=MAGIC.length;await put(1,js(h));
+  for(let i=0;i<L.length;i++){
+   if(u.stop)throw E("Cancel","cancelado pelo usuário");
+   const e=L[i];let lab="#"+e.k+" ("+(e.v.kind||e.v.type||"?")+")",p=null;
+   try{
+    if(typeof bump==="function")bump();
+    if(e.v.nm){try{lab+=" "+D2.decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:e.v.nm.iv},KK,e.v.nm.ct))}catch(_){}}
+    const rec=await tx("m","readonly",s=>s.get(e.k));let v=rec;
+    if(rec instanceof Blob)v=await seal2(await rec.arrayBuffer(),rec.type||"application/octet-stream");
+    if(!v||!v.ct||!v.iv)throw E("Corrupt","registro sem conteúdo criptografado");
+    const ct=new Uint8Array(v.ct),sha=hx(await crypto.subtle.digest("SHA-256",ct));
+    p={ct,sha,m:{id:i+1,uid:(rec&&rec.bk)||sha,iv:b2s(v.iv),type:v.type||"application/octet-stream",album:v.album||"",kind:v.kind||"",del:v.del||0,len:ct.length,nm:v.nm?{iv:b2s(v.nm.iv),ct:b2s(v.nm.ct)}:null}};
+   }catch(x){const w=why(x);bad.push(lab+": "+w);u.log(lab+": "+w);continue}
+   await put(2,js(p.m));
+   for(let o=0;o<p.ct.length;o+=CH)await put(3,p.ct.subarray(o,Math.min(p.ct.length,o+CH)));
+   await put(4,js({id:p.m.id,sha:p.sha}));okN++;
+   u.set((i+1)/L.length,(i+1)+" de "+L.length+" itens · "+Math.round((bytes+qn)/1048576)+" MB");
+  }
+  if(!DECOY){try{const albs=JSON.parse(LS.get("calc_albs")||"[]"),s=await seal2(js({albs}),"t");await put(6,js({iv:b2s(s.iv),ct:b2s(s.ct)}))}catch(_){}}
+  await put(5,js({items:okN,failed:bad.length,created:new Date().toISOString()}));await flush();
+  const sz=await sk.size();if(sz!=null&&sz!==bytes)throw E("Corrupt","tamanho gravado ("+sz+") difere do esperado ("+bytes+") — falta de espaço?");
+  if(bad.length&&!await yes(bad.length+" item(ns) NÃO entraram no backup (veja a lista). Compartilhar mesmo assim?")){u.done("Backup NÃO compartilhado. Itens com falha: "+bad.length);return}
+  const shared=await sk.end();
+  if(!bad.length&&shared)LS.set("calc_lastbk",Date.now());
+  u.done((bad.length?"⚠ Backup INCOMPLETO. ":"✔ Backup concluído. ")+"Itens gravados: "+okN+" · Falhas: "+bad.length+" · "+Math.round(bytes/1048576)+" MB")
+ }catch(x){const w=why(x);u.log(w);u.done("Exportação não concluída: "+w+"\nO backup gerado não é confiável; os dados originais não foram alterados.")}
+ finally{busy=false}}
+/* ---------- importação ---------- */
+async function scan(f){
+ if(f.size<14)throw E("Incompat","arquivo vazio ou pequeno demais");
+ let o=8,hdr=null,foot=null,cur=null;const items=[],prefs=[];
+ while(o<f.size){
+  if(o+5>f.size)throw E("Truncated","arquivo cortado no byte "+o);
+  const h=new Uint8Array(await f.slice(o,o+5).arrayBuffer()),t=h[0],n=new DataView(h.buffer).getUint32(1),p=o+5;
+  if(p+n>f.size)throw E("Truncated","o arquivo termina antes do esperado (cópia ou download interrompido?)");
+  if(t===3){if(!cur)throw E("Corrupt","dados sem item");cur.ch.push([p,n]);cur.got+=n}
+  else{if(n>4194304)throw E("Corrupt","registro com tamanho absurdo");
+   const j=JSON.parse(D2.decode(await f.slice(p,p+n).arrayBuffer()));
+   if(t===1)hdr=j;
+   else if(t===2){if(cur)cur.m.__cut=1;cur={m:j,ch:[],got:0,end:null};items.push(cur)}
+   else if(t===4){if(!cur||cur.m.id!==j.id)throw E("Corrupt","fim de item inesperado");cur.end=j;cur=null}
+   else if(t===5)foot=j;else if(t===6)prefs.push(j);else throw E("Incompat","tipo de registro desconhecido ("+t+")")}
+  o=p+n}
+ if(!hdr||hdr.format!=="VAULT2")throw E("Incompat","cabeçalho ausente");
+ if(hdr.v!==2||hdr.alg!=="AES-256-GCM"||hdr.kdf!=="PBKDF2-SHA256")throw E("Incompat","versão/algoritmo não suportado ("+hdr.v+")");
+ if(!foot||cur)throw E("Truncated","rodapé ausente");
+ if(items.filter(i=>i.end).length!==foot.items)throw E("Truncated","o rodapé indica "+foot.items+" itens, mas só "+items.filter(i=>i.end).length+" estão completos");
+ return{hdr,items,prefs,foot}}
+async function imp(f){
+ if(busy)return;
+ let m;try{m=D2.decode(await f.slice(0,8).arrayBuffer())}catch(e){toast("Não foi possível ler o arquivo: "+why(e));return}
+ if(m!==MAGIC)return OLD(f);
+ let S;try{S=await scan(f)}catch(e){const u=ui("Importar backup");busy=true;u.done("Backup inválido: "+why(e)+"\nNada foi alterado no cofre.");return}
+ const h=S.hdr;
+ modal(h.src==="pin"?"PIN do backup":"Senha do backup",async v=>{let raw;
+  try{raw=await unwrap(h,v)}catch(_){return"Senha/PIN incorreto ou backup alterado"}
+  setTimeout(()=>load(f,S,raw),0);return true},h.src!=="pin")}
+async function load(f,S,raw){
+ busy=true;const u=ui("Importar backup"),KK=K;let ok=0,dup=0;const bad=[];
+ try{
+  if(!KK)throw E("Incompat","cofre bloqueado");
+  const bk=await crypto.subtle.importKey("raw",raw,"AES-GCM",false,["decrypt"]);
+  const seal2=async(buf,type,album)=>{const iv=crypto.getRandomValues(new Uint8Array(12));return{iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},KK,buf),type,album:album||""}};
+  const have=new Set((await loadAll()).map(e=>e.v&&e.v.bk).filter(Boolean)),N=S.items.length;
+  for(let i=0;i<N;i++){
+   if(u.stop)break;const it=S.items[i],m=it.m;let lab="#"+m.id+" ("+(m.kind||m.type)+")";
+   u.set(i/N,"Restaurando "+(i+1)+" de "+N+" · ok "+ok+" · duplicados "+dup+" · falhas "+bad.length);
+   try{
+    if(typeof bump==="function")bump();
+    if(have.has(m.uid)){dup++;continue}
+    let nb=null;if(m.nm){nb=await crypto.subtle.decrypt({name:"AES-GCM",iv:s2b(m.nm.iv)},bk,s2b(m.nm.ct));lab+=" "+D2.decode(nb)}
+    if(!it.end)throw E("Truncated","item incompleto no arquivo");
+    if(it.got!==m.len)throw E("Corrupt","tamanho divergente ("+it.got+" de "+m.len+" bytes)");
+    const ct=new Uint8Array(m.len);let o=0;for(const[p,n]of it.ch){ct.set(new Uint8Array(await f.slice(p,p+n).arrayBuffer()),o);o+=n}
+    if(hx(await crypto.subtle.digest("SHA-256",ct))!==it.end.sha)throw E("Corrupt","SHA-256 não confere (bytes alterados ou danificados)");
+    const iv=s2b(m.iv);if(iv.length!==12)throw E("Corrupt","IV inválido");
+    const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},bk,ct);
+    const s=await seal2(plain,m.type||"application/octet-stream",m.album);
+    if(nb){const e=await seal2(nb,"t","");s.nm={iv:e.iv,ct:e.ct}}
+    if(m.kind)s.kind=m.kind;if(m.del)s.del=m.del;s.bk=m.uid;
+    const k=await tx("m","readwrite",st=>st.add(s)),b=await tx("m","readonly",st=>st.get(k));
+    if(!b||!b.ct||b.ct.byteLength!==s.ct.byteLength)throw E("Corrupt","a gravação não pôde ser confirmada");
+    have.add(m.uid);ok++
+   }catch(x){const w=why(x);bad.push(lab+": "+w);u.log(lab+": "+w);if(/espaço/.test(w)){u.log("Importação interrompida por falta de espaço. O que já foi restaurado foi mantido.");break}}
+  }
+  if(!DECOY)for(const p of S.prefs){try{const j=JSON.parse(D2.decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:s2b(p.iv)},bk,s2b(p.ct)))),a=JSON.parse(LS.get("calc_albs")||"[]");
+   (j.albs||[]).forEach(x=>{if(!a.includes(x))a.push(x)});LS.set("calc_albs",JSON.stringify(a))}catch(_){}}
+  try{renderGal()}catch(_){}
+  u.done((u.stop?"Interrompido. ":"")+"Restaurados: "+ok+"\nJá existiam (duplicados): "+dup+"\nFalharam: "+bad.length+(u.stop?"\nImporte de novo para continuar: o que já entrou não será duplicado.":""))
+ }catch(x){u.done("Importação não concluída: "+why(x)+"\nO que já foi restaurado foi mantido; nada foi apagado.")}
+ finally{busy=false}}
+window.exportBk=exp;window.importBk=imp;
+})();
 </script>
 </body>
 </html>
