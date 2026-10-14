@@ -1480,11 +1480,19 @@ if(gi){
   setTimeout(()=>{try{ev.target.value=""}catch(_){}},0)};
  gi.addEventListener("cancel",()=>{picking=false})}
 window.openImport=function(){
- const el=document.getElementById("gImp");
- if(!el){toast("Seletor de arquivos indisponível neste aparelho");return}
- try{el.value=""}catch(_){}
+ /* cria um seletor novo a cada toque, igual ao de "Arquivos", sem filtro de tipo */
+ let el;try{el=document.createElement("input");el.type="file";el.hidden=true;document.body.appendChild(el)}catch(e){toast("Seletor de arquivos indisponível: "+(e&&e.message||e));return}
+ let got=false,hid=false;
+ const onvis=()=>{if(document.hidden)hid=true};document.addEventListener("visibilitychange",onvis);
+ const fin=()=>{document.removeEventListener("visibilitychange",onvis);setTimeout(()=>{try{el.remove()}catch(_){}},120000)};
+ el.addEventListener("change",()=>{got=true;fin();picking=false;const f=el.files&&el.files[0];
+  if(!f){toast("Nenhum arquivo selecionado");return}
+  toast("Lendo "+f.name+" ("+Math.round(f.size/1048576)+" MB)…");
+  Promise.resolve().then(()=>importBk(f)).catch(e=>toast("Erro ao importar: "+(window.bkWhy?bkWhy(e):e&&e.message||e)))});
+ el.addEventListener("cancel",()=>{picking=false;fin()});
  picking=true;setTimeout(()=>picking=false,90000);
- try{el.click()}catch(e){picking=false;toast("Não foi possível abrir o seletor de arquivos: "+(e&&e.message||e))}};
+ try{el.click()}catch(e){picking=false;fin();toast("Não foi possível abrir o seletor de arquivos: "+(e&&e.message||e));return}
+ setTimeout(()=>{if(!got&&!hid&&!document.hidden){picking=false;toast("O Android não abriu o seletor de arquivos. Tente de novo; se persistir, me avise.")}},3000)};
 })();
 </script>
 <script>
